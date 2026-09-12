@@ -1,0 +1,112 @@
+TAP version 13
+# Subtest: structural signatures accept real JPEG, PNG and WebP fixtures
+ok 1 - structural signatures accept real JPEG, PNG and WebP fixtures
+  ---
+  duration_ms: 1.898204
+  type: 'test'
+  ...
+# Subtest: structural checks reject truncated, appended, forged and non-image content
+ok 2 - structural checks reject truncated, appended, forged and non-image content
+  ---
+  duration_ms: 1.261914
+  type: 'test'
+  ...
+# Subtest: local storage uses random safe URLs and preserves bytes
+ok 3 - local storage uses random safe URLs and preserves bytes
+  ---
+  duration_ms: 11.365502
+  type: 'test'
+  ...
+# Subtest: unmanaged URLs and traversal cannot remove outside files
+ok 4 - unmanaged URLs and traversal cannot remove outside files
+  ---
+  duration_ms: 2.995987
+  type: 'test'
+  ...
+# Subtest: delete rollback leaves bytes and removes the private marker
+ok 5 - delete rollback leaves bytes and removes the private marker
+  ---
+  duration_ms: 6.222078
+  type: 'test'
+  ...
+# Subtest: committed deletion removes both file and marker; missing files are tolerated
+ok 6 - committed deletion removes both file and marker; missing files are tolerated
+  ---
+  duration_ms: 3.977516
+  type: 'test'
+  ...
+# Subtest: restart recovery preserves uncommitted files and cleans committed deletion
+ok 7 - restart recovery preserves uncommitted files and cleans committed deletion
+  ---
+  duration_ms: 5.907379
+  type: 'test'
+  ...
+# Subtest: failed recovery keeps deletion intent for the next restart
+ok 8 - failed recovery keeps deletion intent for the next restart
+  ---
+  duration_ms: 3.537
+  type: 'test'
+  ...
+# Subtest: initialization removes only adapter partial writes, not arbitrary files
+ok 9 - initialization removes only adapter partial writes, not arbitrary files
+  ---
+  duration_ms: 4.458924
+  type: 'test'
+  ...
+# Subtest: symbolic-link upload root is rejected
+ok 10 - symbolic-link upload root is rejected
+  ---
+  duration_ms: 4.152634
+  type: 'test'
+  ...
+# Subtest: one policy consistently controls list scope, ownership and all mutation modes
+ok 11 - one policy consistently controls list scope, ownership and all mutation modes
+  ---
+  duration_ms: 2.12489
+  type: 'test'
+  ...
+# Subtest: all 25 transition combinations match the documented state machine
+ok 12 - all 25 transition combinations match the documented state machine
+  ---
+  duration_ms: 0.557671
+  type: 'test'
+  ...
+# Subtest: sitemap XML escapes all reserved characters and encodes slugs
+ok 13 - sitemap XML escapes all reserved characters and encodes slugs
+  ---
+  duration_ms: 1.570565
+  type: 'test'
+  ...
+# Subtest: empty sitemap and child/index maps have correct entry counts
+ok 14 - empty sitemap and child/index maps have correct entry counts
+  ---
+  duration_ms: 0.298394
+  type: 'test'
+  ...
+# Subtest: robots advertises frontend canonical sitemap and excludes admin
+ok 15 - robots advertises frontend canonical sitemap and excludes admin
+  ---
+  duration_ms: 0.12226
+  type: 'test'
+  ...
+# Subtest: JSON-LD uses editorial title, dates, author, canonical URL and description fallback
+ok 16 - JSON-LD uses editorial title, dates, author, canonical URL and description fallback
+  ---
+  duration_ms: 0.846442
+  type: 'test'
+  ...
+# Subtest: JSON-LD media uses backend origin, ignores unsafe legacy URLs and never invents publish dates
+ok 17 - JSON-LD media uses backend origin, ignores unsafe legacy URLs and never invents publish dates
+  ---
+  duration_ms: 0.27714
+  type: 'test'
+  ...
+1..17
+# tests 17
+# suites 0
+# pass 17
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 1166.089885

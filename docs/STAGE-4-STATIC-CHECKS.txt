@@ -1,0 +1,35 @@
+MARHALE 4 VERIFICATION REPORT | 2026-09-08
+
+EXECUTED
+- Runtime used: Node.js 22.23.1.
+- Syntax-only transpilation: TypeScript 5.6.3, 44 TypeScript files, 0 syntax errors.
+  This does not perform semantic typechecking and is NOT npm run build.
+- Existing local Zod version: 3.25.76 (matches the requested major/minor).
+- node --test on transpiled news-validation.test and news-policy.test:
+  7 tests, 7 passed, 0 failed, 0 skipped.
+  Includes explicit RBAC cases and all 25 status transition combinations.
+- AST inspection: all 10 admin routes have explicit preHandler guards.
+  Shared editor/superAdmin arrays run authenticate before requireRole.
+- All relative TypeScript imports resolve against delivered source files.
+- 23 explicitly protected original files verified byte-identical, including
+  schema, migration files, auth/prisma plugins, users, logger, server,
+  both tsconfigs, all prior tests, and Auth files except auth.routes.ts.
+- strict and exactOptionalPropertyTypes remain enabled.
+
+NOT VERIFIED / UNAVAILABLE
+- npm install / dependency resolution / audit / actual lockfile generation.
+- Prisma generate and real Prisma client types.
+- Full typecheck using project's TypeScript ~5.9.2.
+- npm run build and production dist output.
+- Existing Auth regression suite, new HTTP route suite, PostgreSQL integration.
+
+DIAGNOSTIC ATTEMPT
+Local TypeScript 5.6.3 `tsc --noEmit -p tsconfig.check.json` could not begin
+project checking: TS2688, Cannot find type definition file for 'node'.
+This is NOT a passed typecheck. Fastify, Prisma, tsx and npm were also absent.
+The build sandbox has no internet access for installing dependencies.
+
+DELIVERY HYGIENE
+No node_modules, .env secrets, cookies, scratch JS, dist, fake dependency types,
+or fabricated package-lock.json are shipped. FILES.sha256 covers every file
+except itself. Follow docs/TESTING.md in a dependency-equipped environment.

@@ -1,0 +1,108 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  SUPER_ADMIN
+}
+
+enum NewsStatus {
+  DRAFT
+  IN_REVIEW
+  PUBLISHED
+  ARCHIVED
+  REJECTED
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  // Store only a password hash; hashing and response filtering belong to Auth.
+  passwordHash String
+  displayName  String
+  role         Role     @default(ADMIN)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  news         News[]   @relation("NewsAuthor")
+
+  @@map("users")
+}
+
+model Category {
+  id          String         @id @default(cuid())
+  name        String
+  // Latin URL slug; character validation belongs to the future validation layer.
+  slug        String         @unique
+  description String?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  news        NewsCategory[] @relation("CategoryNewsLinks")
+
+  @@map("categories")
+}
+
+model NewsCategory {
+  newsId     String
+  categoryId String
+  // Deleting a news item removes only its join rows, not the linked categories.
+  news       News     @relation("NewsCategoryLinks", fields: [newsId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  // Deleting a category removes only its join rows, not the linked news items.
+  category   Category @relation("CategoryNewsLinks", fields: [categoryId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@id([newsId, categoryId])
+  // The primary key already indexes newsId; this supports category-first queries.
+  @@index([categoryId])
+  @@map("news_categories")
+}
+
+model Media {
+  id        String   @id @default(cuid())
+  url       String
+  // Optional in storage; strongly encourage meaningful alt text during validation.
+  altText   String?
+  width     Int?
+  height    Int?
+  sizeBytes Int?
+  mimeType  String
+  createdAt DateTime @default(now())
+  news      News[]   @relation("NewsCoverImage")
+
+  @@map("media")
+}
+
+model News {
+  id              String         @id @default(cuid())
+  title           String
+  slug            String         @unique
+  summary         String?
+  lead            String
+  body            String         @db.Text
+  authorId        String
+  coverImageId    String?
+  // Restrict deletion of authors with existing news to preserve attribution.
+  author          User           @relation("NewsAuthor", fields: [authorId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  // Deleting media clears the optional cover reference; the news item survives.
+  coverImage      Media?         @relation("NewsCoverImage", fields: [coverImageId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  categories      NewsCategory[] @relation("NewsCategoryLinks")
+  status          NewsStatus     @default(DRAFT)
+  // Set on publication by future business logic, not by a database default.
+  publishedAt     DateTime?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  seoTitle        String?
+  metaDescription String?
+
+  @@index([status])
+  @@index([publishedAt])
+  @@index([status, publishedAt])
+  @@index([authorId])
+  @@index([coverImageId])
+  @@map("news")
+}

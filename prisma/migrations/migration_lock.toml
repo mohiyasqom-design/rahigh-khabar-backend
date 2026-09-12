@@ -1,0 +1,3 @@
+# Tracks the provider for this manually prepared migration directory.
+# Commit this file with the reviewed migrations.
+provider = "postgresql"
