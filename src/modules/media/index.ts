@@ -3,6 +3,7 @@ import fastifyStatic from '@fastify/static';
 import type { FastifyPluginAsync } from 'fastify';
 import { env } from '../../config/env.js';
 import { mediaRoutes } from './media.routes.js';
+import { mediaUploadRoutes } from './media.upload.routes.js';
 import { LocalMediaStorage, storedFilenamePattern } from './storage.js';
 const mediaModule: FastifyPluginAsync = async (app) => {
   const storage = new LocalMediaStorage(env.UPLOAD_DIR, env.PUBLIC_API_URL);
@@ -25,5 +26,8 @@ const mediaModule: FastifyPluginAsync = async (app) => {
     },
   });
   await app.register(mediaRoutes, { prefix: '/admin/media', storage, maxUploadSize: env.MAX_UPLOAD_SIZE_BYTES });
+  // Stage 10 Part 5 device uploads: registered inside this module so they
+  // share its multipart and static-file setup.
+  await app.register(mediaUploadRoutes, { storage, maxUploadSize: env.MAX_UPLOAD_SIZE_BYTES });
 };
 export default mediaModule;

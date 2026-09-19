@@ -8,13 +8,15 @@
 
 | متد و مسیر | مجوز | درخواست / پاسخ موفق |
 | --- | --- | --- |
-| POST /admin/categories | ADMIN یا SUPER_ADMIN | name, slug, description? / 201 دسته‌بندی |
+| POST /admin/categories | فقط SUPER_ADMIN | name, slug, description?, order? / 201 دسته‌بندی |
 | GET /admin/categories | ADMIN یا SUPER_ADMIN | بدون query / 200 آرایه |
-| PATCH /admin/categories/:id | ADMIN یا SUPER_ADMIN | حداقل یک فیلد قابل‌ویرایش / 200 دسته‌بندی |
-| DELETE /admin/categories/:id | SUPER_ADMIN | 204 بدون بدنه |
+| PATCH /admin/categories/:id | فقط SUPER_ADMIN | حداقل یک فیلد قابل‌ویرایش / 200 دسته‌بندی |
+| DELETE /admin/categories/:id | فقط SUPER_ADMIN | 204 بدون بدنه |
 | GET /categories | عمومی | بدون query / 200 آرایه |
 
-پاسخ دسته‌بندی: `{ id, name, slug, description }`، description ممکن است null باشد. طول name برابر 1..120 و description حداکثر 2000 است. slug بین 1..200 و مطابق `^[a-z0-9]+(-[a-z0-9]+)*$` است. slug تکراری 409، PATCH/DELETE شناسهٔ ناموجود 404. **حذف دسته‌بندی تنها پیوندها را حذف می‌کند و ممکن است خبر PUBLISHED بدون دسته‌بندی باقی بماند.**
+پاسخ دسته‌بندی: `{ id, name, slug, description, order }`، description ممکن است null باشد. طول name برابر 1..120 و description حداکثر 2000 است. slug بین 1..200 و مطابق `^[a-z0-9]+(-[a-z0-9]+)*$` است. `order` عدد صحیح 0..10000 (پیش‌فرض 0) و ترتیب نمایش در ناوبری است؛ هر دو فهرست عمومی و مدیریتی بر اساس `order` سپس `name` مرتب برمی‌گردند. slug تکراری 409، PATCH/DELETE شناسهٔ ناموجود 404.
+
+**مرحلهٔ ۱۰:** نوشتن روی دسته‌بندی‌ها (POST/PATCH/DELETE) فقط برای `SUPER_ADMIN` است؛ نقش `ADMIN` تنها می‌تواند فهرست را بخواند تا هنگام نوشتن خبر دسته انتخاب کند (Least Privilege). **حذف دسته‌بندی‌ای که خبری به آن متصل است دیگر پیوندها را پاک نمی‌کند؛ پاسخ `409 CATEGORY_IN_USE` است** و ابتدا باید دستهٔ آن خبرها تغییر کند. ده دستهٔ رسمی سایت با migration `20260916000000_category_order_and_seed` seed می‌شوند و «خانه» جزو آن‌ها نیست (فقط لینک ناوبری به `/`).
 
 ## خبر مدیریتی
 
@@ -85,7 +87,7 @@ API عمومی خبر `Cache-Control: no-store` دارد تا پس از آرشی
 | 401 | UNAUTHORIZED, TOKEN_EXPIRED |
 | 403 | FORBIDDEN, ORIGIN_NOT_ALLOWED |
 | 404 | NEWS_NOT_FOUND یا NOT_FOUND |
-| 409 | SLUG_CONFLICT یا CONCURRENT_MODIFICATION |
+| 409 | SLUG_CONFLICT، CATEGORY_IN_USE یا CONCURRENT_MODIFICATION |
 
 parser/خطای زیرساخت عمومی شکل قدیمی `{ "error": "..." }` دارد، برای حفظ رفتار Auth. در هیچ‌یک جزئیات SQL یا secret منتشر نمی‌شود. 413 برای body بزرگ و 415 برای content-type پشتیبانی‌نشده ممکن است.
 

@@ -35,12 +35,17 @@ test('PostgreSQL: complete Category/News CRUD, RBAC, publication and atomic rela
   const root = await user('SUPER_ADMIN', 'root');
   const owner = await user('ADMIN', 'owner');
   const other = await user('ADMIN', 'other');
-  const cat = await app.inject({ method: 'POST', url: '/admin/categories', headers: owner.headers,
-    payload: { name: 'ایران', slug: `${prefix}-iran` } });
+  // Stage 10: only SUPER_ADMIN may create/edit/delete a category. ADMIN keeps
+  // read access because it must pick a category when writing news.
+  assert.equal((await app.inject({ method: 'POST', url: '/admin/categories', headers: owner.headers,
+    payload: { name: 'ایران', slug: `${prefix}-iran` } })).statusCode, 403);
+  const cat = await app.inject({ method: 'POST', url: '/admin/categories', headers: root.headers,
+    payload: { name: 'ایران', slug: `${prefix}-iran`, order: 1 } });
   assert.equal(cat.statusCode, 201, cat.body);
+  assert.equal(cat.json().order, 1);
   const catId: string = cat.json().id; categoryIds.push(catId);
   const second = await app.inject({ method: 'POST', url: '/admin/categories', headers: root.headers,
-    payload: { name: 'سیاست', slug: `${prefix}-politics`, description: 'test' } });
+    payload: { name: 'سیاست', slug: `${prefix}-politics`, description: 'test', order: 2 } });
   assert.equal(second.statusCode, 201, second.body);
   const secondId: string = second.json().id; categoryIds.push(secondId);
   assert.equal((await app.inject({ method: 'POST', url: '/admin/categories', headers: root.headers,
@@ -48,8 +53,16 @@ test('PostgreSQL: complete Category/News CRUD, RBAC, publication and atomic rela
   assert.equal((await app.inject('/categories')).statusCode, 200);
   assert.equal((await app.inject({ url: '/admin/categories', headers: owner.headers })).statusCode, 200);
   assert.equal((await app.inject({ method: 'PATCH', url: `/admin/categories/${catId}`, headers: owner.headers,
+    payload: { description: 'ویرایش' } })).statusCode, 403);
+  assert.equal((await app.inject({ method: 'PATCH', url: `/admin/categories/${catId}`, headers: root.headers,
     payload: { description: 'ویرایش' } })).statusCode, 200);
   assert.equal((await app.inject({ method: 'DELETE', url: `/admin/categories/${catId}`, headers: owner.headers })).statusCode, 403);
+  // The public list is ordered by `order`, and the seeded «خانه» is not in it.
+  const publicCategories = await app.inject('/categories');
+  assert.equal(publicCategories.statusCode, 200, publicCategories.body);
+  const publicOrders = publicCategories.json().map((row: { order: number }) => row.order);
+  assert.deepEqual(publicOrders, [...publicOrders].sort((a: number, b: number) => a - b));
+  assert.equal(publicCategories.json().some((row: { name: string }) => row.name === 'خانه'), false);
   const media = await prisma.media.create({ data: { url: 'https://example.invalid/cover.jpg', mimeType: 'image/jpeg' } });
   mediaId = media.id;
   const payload = { title: 'خبر', slug: `${prefix}-story`, lead: 'لید', body: 'متن', categoryIds: [catId],
@@ -112,8 +125,13 @@ test('PostgreSQL: complete Category/News CRUD, RBAC, publication and atomic rela
   assert.equal((await app.inject({ method: 'PATCH', url, headers: owner.headers, payload: { title: 'forbidden' } })).statusCode, 403);
   assert.equal((await transition('PUBLISHED')).statusCode, 200);
   assert.equal((await prisma.news.findUniqueOrThrow({ where: { id } })).publishedAt?.getTime(), originalTime);
+  // Stage 10: a category still attached to a news item cannot be deleted.
+  assert.equal((await app.inject({ method: 'DELETE', url: `/admin/categories/${secondId}`, headers: root.headers })).statusCode, 409);
+  assert.equal((await prisma.newsCategory.count({ where: { categoryId: secondId } })), 1);
+  // Once the article is moved off it, the same delete succeeds.
+  assert.equal((await app.inject({ method: 'PATCH', url, headers: root.headers, payload: { categoryIds: [catId] } })).statusCode, 200);
   assert.equal((await app.inject({ method: 'DELETE', url: `/admin/categories/${secondId}`, headers: root.headers })).statusCode, 204);
-  assert.equal((await app.inject(`/news/${payload.slug}`)).json().categories.length, 0);
+  assert.deepEqual((await app.inject(`/news/${payload.slug}`)).json().categories.map((c: { slug: string }) => c.slug), [`${prefix}-iran`]);
   assert.equal((await app.inject({ method: 'DELETE', url, headers: owner.headers })).statusCode, 403);
   assert.equal((await app.inject({ method: 'DELETE', url, headers: root.headers })).statusCode, 204);
   assert.equal(await prisma.news.findUnique({ where: { id } }), null);

@@ -16,6 +16,8 @@ enum NewsStatus {
   DRAFT
   IN_REVIEW
   PUBLISHED
+  // Stage 10 Part 5: queued for automatic publication by the scheduler.
+  SCHEDULED
   ARCHIVED
   REJECTED
 }
@@ -31,6 +33,7 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
   news         News[]   @relation("NewsAuthor")
+  uploadedMedia MediaAsset[] @relation("StaffUploads")
 
   @@map("users")
 }
@@ -41,10 +44,15 @@ model Category {
   // Latin URL slug; character validation belongs to the future validation layer.
   slug        String         @unique
   description String?
+  // Stage 10 - navigation position. Lower first; ties fall back to name, so a
+  // duplicated value is cosmetic and never produces an unstable list order.
+  order       Int            @default(0)
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
   news        NewsCategory[] @relation("CategoryNewsLinks")
+  followers   CategoryFollow[]
 
+  @@index([order])
   @@map("categories")
 }
 
@@ -73,6 +81,7 @@ model Media {
   mimeType  String
   createdAt DateTime @default(now())
   news      News[]   @relation("NewsCoverImage")
+  asset     MediaAsset?
 
   @@map("media")
 }
@@ -94,15 +103,235 @@ model News {
   status          NewsStatus     @default(DRAFT)
   // Set on publication by future business logic, not by a database default.
   publishedAt     DateTime?
+  scheduledFor    DateTime?
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
   seoTitle        String?
   metaDescription String?
+  // Stage 10 Part 2 back-relations. Like.news and Comment.news point at News,
+  // so the opposite fields belong here and not on Media. Without them the
+  // schema does not validate and `prisma generate` fails.
+  likes           Like[]
+  comments        Comment[]
+  pageViews       PageView[]
+  readingSessions ReadingSession[]
+  shareEvents     ShareEvent[]
+  savedBy         SavedNews[]
+  // Stage 10 Part 5 full-text search column. Maintained by a database
+  // trigger (see the Part 5 migration); Prisma only needs to know it exists
+  // so `prisma db pull`/`migrate` do not try to drop it.
+  searchVector    Unsupported("tsvector")?
 
   @@index([status])
   @@index([publishedAt])
   @@index([status, publishedAt])
   @@index([authorId])
   @@index([coverImageId])
+  @@index([scheduledFor])
   @@map("news")
+}
+
+
+enum UserRole {
+  USER
+  ADMIN
+  SUPER_ADMIN
+}
+
+// Stage 10 Part 2: Regular user accounts via Google OAuth
+model RegularUser {
+  id           String   @id @default(cuid())
+  googleId     String   @unique
+  email        String   // from Google
+  // Nullable until onboarding picks one. UNIQUE allows many NULLs in
+  // PostgreSQL; the previous NOT NULL forced an '' placeholder that made the
+  // second Google signup fail on the unique index.
+  username     String?  @unique // 3-20 alphanumeric + underscore
+  displayName  String   // max 50 chars, can be Persian
+  avatarUrl    String?  // Google's or custom upload
+  role         UserRole @default(USER)
+  usernameSetAt DateTime? // null until onboarding complete
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  likes        Like[]
+  comments     Comment[]
+  pageViews    PageView[]
+  savedNews    SavedNews[]
+  follows           CategoryFollow[]
+  pushSubscriptions PushSubscription[]
+  uploadedMedia     MediaAsset[]       @relation("SiteUserUploads")
+
+  @@index([googleId])
+  @@map("regular_users")
+}
+
+model Like {
+  id        String   @id @default(cuid())
+  userId    String
+  newsId    String
+  createdAt DateTime @default(now())
+  user      RegularUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+  news      News     @relation(fields: [newsId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, newsId])
+  @@index([newsId])
+  @@map("likes")
+}
+
+model Comment {
+  id        String   @id @default(cuid())
+  userId    String
+  newsId    String
+  content   String   @db.Text // max 1000 chars
+  isDeleted Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      RegularUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+  news      News     @relation(fields: [newsId], references: [id], onDelete: Cascade)
+
+  @@index([newsId])
+  @@index([userId])
+  @@map("comments")
+}
+
+// --- Stage 10 Part 4: analytics ---------------------------------------------
+
+enum SharePlatform {
+  TELEGRAM
+  TWITTER
+  WHATSAPP
+  COPY_LINK
+  OTHER
+}
+
+enum TrafficSource {
+  DIRECT
+  SEARCH_ENGINE
+  SOCIAL
+  INTERNAL_NEWS
+  INTERNAL_HOME
+  INTERNAL_OTHER
+  EXTERNAL_LINK
+}
+
+/// One row per page view. visitorId is a daily-rotating hash, never an IP.
+model PageView {
+  id             String        @id @default(cuid())
+  newsId         String?
+  userId         String?
+  visitorId      String
+  path           String?
+  referrer       String?
+  referrerSource TrafficSource @default(DIRECT)
+  userAgent      String?
+  createdAt      DateTime      @default(now())
+
+  news News?        @relation(fields: [newsId], references: [id], onDelete: Cascade)
+  user RegularUser? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([newsId, createdAt])
+  @@index([createdAt])
+  @@index([visitorId, createdAt])
+  @@index([referrerSource, createdAt])
+  @@index([userId, createdAt])
+  @@map("page_views")
+}
+
+/// How long a reader stayed and how far they scrolled.
+model ReadingSession {
+  id                 String   @id @default(cuid())
+  newsId             String
+  visitorId          String
+  durationSeconds    Int
+  scrollDepthPercent Int
+  createdAt          DateTime @default(now())
+
+  news News @relation(fields: [newsId], references: [id], onDelete: Cascade)
+
+  @@index([newsId, createdAt])
+  @@index([createdAt])
+  @@map("reading_sessions")
+}
+
+model ShareEvent {
+  id        String        @id @default(cuid())
+  newsId    String
+  platform  SharePlatform
+  createdAt DateTime      @default(now())
+
+  news News @relation(fields: [newsId], references: [id], onDelete: Cascade)
+
+  @@index([newsId, createdAt])
+  @@index([createdAt])
+  @@map("share_events")
+}
+
+model SavedNews {
+  id        String   @id @default(cuid())
+  userId    String
+  newsId    String
+  createdAt DateTime @default(now())
+
+  user RegularUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+  news News        @relation(fields: [newsId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, newsId])
+  @@index([newsId])
+  @@index([userId, createdAt])
+  @@map("saved_news")
+}
+
+// ---------------------------------------------------------------------------
+// Stage 10 Part 5
+// ---------------------------------------------------------------------------
+
+/// Provenance of an uploaded image: who sent it and under which filename.
+/// Kept separate from Media so the existing media rows (and every query that
+/// selects them) stay untouched.
+model MediaAsset {
+  id                   String       @id @default(cuid())
+  mediaId              String       @unique
+  media                Media        @relation(fields: [mediaId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  filename             String
+  url                  String
+  sizeBytes            Int
+  uploadedById         String?
+  uploadedBy           User?        @relation("StaffUploads", fields: [uploadedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  uploadedBySiteUserId String?
+  uploadedBySiteUser   RegularUser? @relation("SiteUserUploads", fields: [uploadedBySiteUserId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  createdAt            DateTime     @default(now())
+
+  @@index([createdAt])
+  @@map("media_assets")
+}
+
+/// A Web Push endpoint. `endpoint` is unique because the browser reuses it for
+/// the same subscription, so re-subscribing must update instead of duplicate.
+model PushSubscription {
+  id         String       @id @default(cuid())
+  endpoint   String       @unique
+  p256dh     String
+  auth       String
+  userAgent  String?
+  userId     String?
+  user       RegularUser? @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  createdAt  DateTime     @default(now())
+  lastSeenAt DateTime     @default(now())
+
+  @@index([userId])
+  @@map("push_subscriptions")
+}
+
+/// "Follow a category": drives the personal feed and targeted notifications.
+model CategoryFollow {
+  id         String      @id @default(cuid())
+  userId     String
+  user       RegularUser @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  categoryId String
+  category   Category    @relation(fields: [categoryId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  createdAt  DateTime    @default(now())
+
+  @@unique([userId, categoryId])
+  @@index([categoryId])
+  @@map("category_follows")
 }

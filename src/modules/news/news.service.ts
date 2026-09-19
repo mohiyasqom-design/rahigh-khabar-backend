@@ -3,8 +3,10 @@ import type { NewsStatus, PrismaClient } from '@prisma/client';
 import { ApiError } from '../../utils/api-error.js';
 import { writeTransaction } from '../../utils/database.js';
 import { pageResult } from '../../utils/validation.js';
+import { sanitizeNewsBody } from '../../utils/sanitizer.js';
 import { categorySelect } from '../categories/categories.service.js';
 import { assertTransition, newsPolicy } from './news.policy.js';
+import { afterEdited, afterPublished } from './news.hooks.js';
 import type { NewsActor } from './news.policy.js';
 import type { AdminNewsQuery, CreateNewsInput, PublicNewsQuery, UpdateNewsInput } from './news.schema.js';
 
@@ -19,7 +21,9 @@ const publicListSelect = {
   title: true, slug: true, summary: true, lead: true, publishedAt: true, ...publicRelations,
 } satisfies Prisma.NewsSelect;
 const publicDetailSelect = {
-  ...publicListSelect, body: true, seoTitle: true, metaDescription: true, updatedAt: true,
+  // `id` is part of the public detail payload: likes and comments are addressed
+  // by id, while the article URL only carries the slug.
+  ...publicListSelect, id: true, body: true, seoTitle: true, metaDescription: true, updatedAt: true,
 } satisfies Prisma.NewsSelect;
 function flattenCategories<T extends { categories: { category: unknown }[] }>(news: T) {
   return { ...news, categories: news.categories.map((link) => link.category) };
@@ -45,7 +49,11 @@ export function createNews(prisma: PrismaClient, actor: NewsActor, input: Create
     const news = await tx.news.create({
       data: {
         title: input.title, slug: input.slug, summary: input.summary ?? null,
-        lead: input.lead, body: input.body, status: 'DRAFT', publishedAt: null,
+        lead: input.lead, body: sanitizeNewsBody(input.body),
+        // Stage 10 Part 5: a schedule supplied on creation means SCHEDULED,
+        // otherwise the scheduler would never pick the article up.
+        status: input.scheduledFor ? 'SCHEDULED' : 'DRAFT', publishedAt: null,
+        scheduledFor: input.scheduledFor ? new Date(input.scheduledFor) : null,
         // Only authenticated identity, never any authorId/status from the payload.
         author: { connect: { id: actor.id } },
         ...(input.coverImageId ? { coverImage: { connect: { id: input.coverImageId } } } : {}),
@@ -73,8 +81,8 @@ export async function getAdminNews(prisma: PrismaClient, actor: NewsActor, id: s
   newsPolicy.assert(actor, news, 'read');
   return flattenCategories(news);
 }
-export function updateNews(prisma: PrismaClient, actor: NewsActor, id: string, input: UpdateNewsInput) {
-  return writeTransaction(prisma, async (tx) => {
+export async function updateNews(prisma: PrismaClient, actor: NewsActor, id: string, input: UpdateNewsInput) {
+  const result = await writeTransaction(prisma, async (tx) => {
     const current = await tx.news.findUnique({ where: { id }, select: { authorId: true, status: true } });
     if (!current) throw missingNews();
     newsPolicy.assert(actor, current, 'edit');
@@ -86,9 +94,21 @@ export function updateNews(prisma: PrismaClient, actor: NewsActor, id: string, i
     if (input.slug !== undefined) data.slug = input.slug;
     if (input.summary !== undefined) data.summary = input.summary;
     if (input.lead !== undefined) data.lead = input.lead;
-    if (input.body !== undefined) data.body = input.body;
+    if (input.body !== undefined) data.body = sanitizeNewsBody(input.body);
     if (input.seoTitle !== undefined) data.seoTitle = input.seoTitle;
     if (input.metaDescription !== undefined) data.metaDescription = input.metaDescription;
+    if (input.scheduledFor !== undefined) {
+      data.scheduledFor =
+        input.scheduledFor === null ? null : new Date(input.scheduledFor);
+      // The schedule and the status must stay consistent: clearing the date
+      // must not leave the article queued, and setting one on an unpublished
+      // article must queue it.
+      if (input.scheduledFor === null) {
+        if (current.status === 'SCHEDULED') data.status = 'DRAFT';
+      } else if (['DRAFT', 'REJECTED', 'IN_REVIEW', 'SCHEDULED'].includes(current.status)) {
+        data.status = 'SCHEDULED';
+      }
+    }
     if (input.coverImageId !== undefined) {
       data.coverImage = input.coverImageId === null ? { disconnect: true } : { connect: { id: input.coverImageId } };
     }
@@ -98,6 +118,11 @@ export function updateNews(prisma: PrismaClient, actor: NewsActor, id: string, i
     const news = await tx.news.update({ where: { id }, data, include: adminInclude });
     return flattenCategories(news);
   });
+  // Editing a live article changes the text that semantic search indexed, so
+  // the embedding is refreshed outside the transaction. No notification: an
+  // edit is not a publication.
+  if (result.status === 'PUBLISHED') await afterEdited(prisma, result.id);
+  return result;
 }
 export async function deleteNews(prisma: PrismaClient, actor: NewsActor, id: string): Promise<void> {
   await writeTransaction(prisma, async (tx) => {
@@ -107,8 +132,8 @@ export async function deleteNews(prisma: PrismaClient, actor: NewsActor, id: str
     await tx.news.delete({ where: { id } });
   });
 }
-export function changeNewsStatus(prisma: PrismaClient, actor: NewsActor, id: string, status: NewsStatus) {
-  return writeTransaction(prisma, async (tx) => {
+export async function changeNewsStatus(prisma: PrismaClient, actor: NewsActor, id: string, status: NewsStatus) {
+  const result = await writeTransaction(prisma, async (tx) => {
     const current = await tx.news.findUnique({ where: { id }, select: { authorId: true, status: true, publishedAt: true } });
     if (!current) throw missingNews();
     newsPolicy.assert(actor, current, 'status');
@@ -116,9 +141,17 @@ export function changeNewsStatus(prisma: PrismaClient, actor: NewsActor, id: str
     // Preserve FIRST publication time across archive/re-publication. Never
     // clear it on other transitions. Concurrent first publication is serialized.
     const publishedAt = status === 'PUBLISHED' && current.publishedAt === null ? new Date() : current.publishedAt;
-    const news = await tx.news.update({ where: { id }, data: { status, publishedAt }, include: adminInclude });
+    const data: Prisma.NewsUpdateInput = { status, publishedAt };
+    // Publishing now (or pulling the article back to a draft) retires the queue
+    // entry, so the scheduler cannot publish the same article a second time.
+    if (status === 'PUBLISHED' || status === 'DRAFT') data.scheduledFor = null;
+    const news = await tx.news.update({ where: { id }, data, include: adminInclude });
     return flattenCategories(news);
   });
+  // Outside the transaction on purpose: notifications and embeddings are
+  // network calls and must never extend a database transaction.
+  if (status === 'PUBLISHED') await afterPublished(prisma, result.id);
+  return result;
 }
 export async function listPublicNews(prisma: PrismaClient, query: PublicNewsQuery) {
   const where: Prisma.NewsWhereInput = { status: 'PUBLISHED' };
@@ -131,13 +164,26 @@ export async function listPublicNews(prisma: PrismaClient, query: PublicNewsQuer
   ], { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
   return pageResult(items.map(flattenCategories), total, query.page, query.pageSize);
 }
-export async function getPublicNews(prisma: PrismaClient, slug: string) {
+export async function getPublicNews(prisma: PrismaClient, slug: string, viewerId: string | null = null) {
   const news = await prisma.news.findFirst({ where: { slug, status: 'PUBLISHED' }, select: publicDetailSelect });
   // Exactly the same 404 for absent and nonpublic records, including ARCHIVED.
   if (!news) throw missingNews();
+  // Engagement totals ship with the article so the page renders real numbers on
+  // first paint. `likedByCurrentUser` is per-visitor, so an anonymous (and
+  // therefore cacheable) read always reports false and the browser refreshes it
+  // from GET /news/:id/likes.
+  const [likesCount, commentsCount, likedByCurrentUser] = await Promise.all([
+    prisma.like.count({ where: { newsId: news.id } }),
+    prisma.comment.count({ where: { newsId: news.id, isDeleted: false } }),
+    viewerId === null
+      ? Promise.resolve(false)
+      : prisma.like.findUnique({
+        where: { userId_newsId: { userId: viewerId, newsId: news.id } }, select: { id: true },
+      }).then((like) => like !== null),
+  ]);
   // Normalize legacy blank metadata only at the public read boundary.
   return { ...flattenCategories(news),
     seoTitle: news.seoTitle?.trim() || null,
-    metaDescription: news.metaDescription?.trim() || null };
-
+    metaDescription: news.metaDescription?.trim() || null,
+    likesCount, commentsCount, likedByCurrentUser };
 }

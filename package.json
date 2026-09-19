@@ -19,6 +19,7 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:migrate:deploy": "prisma migrate deploy",
+    "backfill-embeddings": "npm run prisma:generate && tsx scripts/backfill-embeddings.ts",
     "test:media-seo": "npm run prisma:generate && node --import tsx --import ./tests/setup.ts --test tests/media-*.test.ts tests/seo-*.test.ts"
   },
   "dependencies": {
@@ -36,10 +37,14 @@
     "zod": "^3.25.76",
     "@fastify/multipart": "^9.0.3",
     "@fastify/static": "^8.2.0",
-    "image-size": "^2.0.2"
+    "image-size": "^2.0.2",
+    "sanitize-html": "^2.11.0",
+    "sharp": "^0.34.2",
+    "web-push": "^3.6.7"
   },
   "devDependencies": {
     "@types/node": "^22.18.0",
+    "@types/web-push": "^3.6.4",
     "prisma": "6.19.0",
     "tsx": "^4.20.5",
     "typescript": "~5.9.2"

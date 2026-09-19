@@ -19,7 +19,7 @@ async function newsHarness() {
     status: 'PUBLISHED', authorId: 'internal-author', publishedAt: new Date('2026-01-01T00:00:00Z'),
     seoTitle: 'سئو', metaDescription: 'متا', coverImage: null,
     author: { displayName: 'نویسنده', email: 'private@example.invalid', passwordHash: 'PRIVATE_HASH' },
-    categories: [{ category: { id: 'cat', name: 'ایران', slug: 'iran', description: null, internal: 'PRIVATE_FIELD' } }],
+    categories: [{ category: { id: 'cat', name: 'ایران', slug: 'iran', description: null, order: 1, internal: 'PRIVATE_FIELD' } }],
   };
   const prisma = {
     user: { findUnique: async () => admin },
@@ -60,15 +60,20 @@ test('all ten admin routes reject missing sessions', async (t) => {
     assert.equal(response.statusCode, 401, `${method} ${url}: ${response.body}`);
   }
 });
-test('Admin cannot delete either entity or change status, and cannot read/edit another author', async (t) => {
+test('Admin cannot write categories, delete either entity or change status, and cannot read/edit another author', async (t) => {
   const { app, headers } = await newsHarness(); t.after(() => app.close());
-  for (const [method, url] of [
-    ['DELETE', '/admin/categories/cat'], ['DELETE', '/admin/news/n'], ['POST', '/admin/news/n/status'],
-    ['GET', '/admin/news/n'], ['PATCH', '/admin/news/n'],
+  for (const [method, url, payload] of [
+    // Stage 10: category writes are SUPER_ADMIN only; reading stays open to ADMIN.
+    ['POST', '/admin/categories', { name: 'ایران', slug: 'iran' }],
+    ['PATCH', '/admin/categories/cat', { name: 'ایران' }],
+    ['DELETE', '/admin/categories/cat', undefined],
+    ['DELETE', '/admin/news/n', undefined], ['POST', '/admin/news/n/status', undefined],
+    ['GET', '/admin/news/n', undefined], ['PATCH', '/admin/news/n', { title: 'new' }],
   ] as const) {
-    const response = await app.inject({ method, url, headers, ...(method === 'PATCH' ? { payload: { title: 'new' } } : {}) });
-    assert.equal(response.statusCode, 403, response.body);
+    const response = await app.inject({ method, url, headers, ...(payload ? { payload } : {}) });
+    assert.equal(response.statusCode, 403, `${method} ${url}: ${response.body}`);
   }
+  assert.equal((await app.inject({ url: '/admin/categories', headers })).statusCode, 200);
 });
 test('public serialization strips internal fields and queries/counts require PUBLISHED', async (t) => {
   const { app, whereChecks } = await newsHarness(); t.after(() => app.close());
