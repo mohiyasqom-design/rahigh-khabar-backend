@@ -17,10 +17,14 @@ test('one policy consistently controls list scope, ownership and all mutation mo
     assert.doesNotThrow(() => newsPolicy.assert(admin, mine, 'read'));
     assert.throws(() => newsPolicy.assert(admin, other, 'read'), denied);
     assert.throws(() => newsPolicy.assert(admin, other, 'edit'), denied);
-    if (['DRAFT', 'IN_REVIEW', 'REJECTED'].includes(status)) assert.doesNotThrow(() => newsPolicy.assert(admin, mine, 'edit'));
-    else assert.throws(() => newsPolicy.assert(admin, mine, 'edit'), denied);
+    // Group 1: an ADMIN may delete exactly what they may edit (own + unpublished).
+    for (const action of ['edit', 'delete'] as const) {
+      if (['DRAFT', 'IN_REVIEW', 'REJECTED'].includes(status)) assert.doesNotThrow(() => newsPolicy.assert(admin, mine, action));
+      else assert.throws(() => newsPolicy.assert(admin, mine, action), denied);
+    }
+    assert.throws(() => newsPolicy.assert(admin, other, 'delete'), denied);
     for (const action of ['read', 'edit', 'delete', 'status'] as const) assert.doesNotThrow(() => newsPolicy.assert(root, other, action));
-    for (const action of ['delete', 'status'] as const) assert.throws(() => newsPolicy.assert(admin, mine, action), denied);
+    assert.throws(() => newsPolicy.assert(admin, mine, 'status'), denied);
   }
 });
 test('all 25 transition combinations match the documented state machine', () => {

@@ -93,6 +93,35 @@ export const mediaUploadRoutes: FastifyPluginAsync<MediaUploadOptions> = async (
     return media;
   });
 
+  /**
+   * Group 1 — images uploaded from INSIDE the news body editor.
+   *
+   * A separate route (the cover upload above is left untouched) that runs the
+   * exact same shared pipeline: `readUpload` (size ceiling) and
+   * `uploadMediaFile` (magic-byte `inspectImage`, sharp re-encode, UUID name,
+   * atomic write, MediaAsset row). No validation logic is duplicated here.
+   *
+   * The returned `url` is inserted by the editor at the cursor. The article
+   * does not exist yet for a brand-new draft, so the upload is linked to its
+   * article later, when the article is saved (`linkInlineMedia`).
+   *
+   * Same guard as every admin route: staff session + ADMIN/SUPER_ADMIN.
+   * A site visitor (or anonymous caller) gets 401/403 before any byte of the
+   * multipart body is consumed (`onRequest`, not `preHandler`).
+   */
+  app.post('/media/editor-upload', {
+    onRequest: [app.authenticate, app.requireRole('ADMIN', 'SUPER_ADMIN')],
+    bodyLimit: maxUploadSize + 16_384,
+    schema: { response: { 201: mediaSchema, ...errorResponses } },
+  }, async (request, reply) => {
+    const { file, altText } = await readUpload(request, maxUploadSize);
+    const media = await uploadMediaFile(app.prisma, storage, file, altText, {
+      staffId: request.authUser?.id ?? null,
+    });
+    reply.code(201);
+    return media;
+  });
+
   app.get('/media', {
     onRequest: [app.authenticate, app.requireRole('ADMIN', 'SUPER_ADMIN')],
     schema: { response: { 200: listSchema, ...errorResponses } },

@@ -1,5 +1,5 @@
 import app from './app.js';
-import { env } from './config/env.js';
+import { configurationWarnings, env } from './config/env.js';
 import { DatabaseStartupError } from './plugins/prisma.plugin.js';
 
 let closing = false;
@@ -23,6 +23,11 @@ async function shutdown() {
 
 process.once('SIGINT', () => { void shutdown(); });
 process.once('SIGTERM', () => { void shutdown(); });
+
+// Group 3: surface ignored / suspicious configuration once at boot.
+for (const warning of configurationWarnings()) {
+  app.log.warn({ configuration: true }, warning);
+}
 
 try {
   await app.listen({ port: env.PORT, host: '0.0.0.0' });

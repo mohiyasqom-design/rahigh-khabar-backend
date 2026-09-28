@@ -117,6 +117,9 @@ model News {
   readingSessions ReadingSession[]
   shareEvents     ShareEvent[]
   savedBy         SavedNews[]
+  // Group 1: editorial tags (multi-select) and uploads embedded in the body.
+  tags            NewsTag[]
+  inlineMedia     MediaAsset[]   @relation("NewsInlineMedia")
   // Stage 10 Part 5 full-text search column. Maintained by a database
   // trigger (see the Part 5 migration); Prisma only needs to know it exists
   // so `prisma db pull`/`migrate` do not try to drop it.
@@ -131,6 +134,26 @@ model News {
   @@map("news")
 }
 
+
+/// Group 1: editorial tags an article can carry at the same time (multi-select).
+/// FEATURED feeds the homepage slider, TRENDING the "most read" sidebar, and
+/// LATEST is a manual override of the date-ordered "latest" feed.
+enum NewsTagType {
+  FEATURED
+  TRENDING
+  LATEST
+}
+
+model NewsTag {
+  newsId    String
+  tag       NewsTagType
+  createdAt DateTime    @default(now())
+  news      News        @relation(fields: [newsId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@id([newsId, tag])
+  @@index([tag, newsId])
+  @@map("news_tags")
+}
 
 enum UserRole {
   USER
@@ -299,9 +322,16 @@ model MediaAsset {
   uploadedBy           User?        @relation("StaffUploads", fields: [uploadedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
   uploadedBySiteUserId String?
   uploadedBySiteUser   RegularUser? @relation("SiteUserUploads", fields: [uploadedBySiteUserId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  // Group 1: the article whose BODY embeds this upload. Linked when the article
+  // is saved (the body is scanned for our own /uploads/ URLs), so deleting the
+  // article can find and remove every file it owns. SetNull, not Cascade: the
+  // file on disk must be removed by the application, never orphaned by an FK.
+  newsId               String?
+  news                 News?        @relation("NewsInlineMedia", fields: [newsId], references: [id], onDelete: SetNull, onUpdate: Cascade)
   createdAt            DateTime     @default(now())
 
   @@index([createdAt])
+  @@index([newsId])
   @@map("media_assets")
 }
 

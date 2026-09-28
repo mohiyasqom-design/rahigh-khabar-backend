@@ -70,4 +70,11 @@ export const analyticsConfig = {
   launchCheckpointHours: [1, 6, 24, 168] as readonly number[],
   /** Beyond this span a chart switches from daily to monthly buckets. */
   dailyBucketMaxDays: 400,
+  /**
+   * Group 3: the same reader opening the same article again inside this window
+   * is not counted again (refresh, back/forward, rapid switching).
+   */
+  viewDedupeWindowMs: 10 * 60_000,
+  /** Hard memory ceiling for the de-duplication window (~a few MB at most). */
+  viewDedupeMaxEntries: 50_000,
 } as const;

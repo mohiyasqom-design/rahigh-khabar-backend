@@ -146,10 +146,95 @@ export function isGoogleOAuthConfigured(): boolean {
   return env.GOOGLE_CLIENT_ID !== undefined && env.GOOGLE_CLIENT_SECRET !== undefined;
 }
 
+// Group 3: configuration problems that do not stop the server but silently
+// break sign-in. They are collected once and logged at startup (server.ts), so
+// the operator sees them in the Railway log instead of users seeing "logged out".
+const configurationProblems: string[] = [];
+
+/** Warnings about env values that were ignored or look wrong. Never contains secrets. */
+export function configurationWarnings(): readonly string[] {
+  return configurationProblems;
+}
+
+function derivedGoogleCallbackUrl(): string {
+  return new URL('/auth/google/callback', env.PUBLIC_API_URL).toString();
+}
+
+// Group 3 fix. The OAuth state cookie is host-only on the API host that served
+// GET /auth/google, and the visitor cookie is set by the callback response. A
+// callback on ANY other origin (for example a GOOGLE_CALLBACK_URL left on the
+// old kodbot.ir / *.up.railway.app host after the domain move) therefore can
+// never work: the state check fails, or the session cookie lands on a host the
+// site never talks to. Such a value is ignored in favour of the derived URL.
+const resolvedGoogleCallbackUrl: string = (() => {
+  const configured = env.GOOGLE_CALLBACK_URL;
+  if (configured === undefined) return derivedGoogleCallbackUrl();
+  const apiOrigin = new URL(env.PUBLIC_API_URL).origin;
+  if (new URL(configured).origin !== apiOrigin) {
+    configurationProblems.push(
+      `GOOGLE_CALLBACK_URL points to ${new URL(configured).origin}, not PUBLIC_API_URL (${apiOrigin}); ` +
+      `it was ignored and ${derivedGoogleCallbackUrl()} is used instead. ` +
+      'Register exactly that URL in Google Cloud Console, or remove GOOGLE_CALLBACK_URL.',
+    );
+    return derivedGoogleCallbackUrl();
+  }
+  return configured;
+})();
+
 // Single source of truth: the authorize request, the token exchange and the
 // Google console entry must all use the exact same redirect URI string.
 export function googleCallbackUrl(): string {
-  return env.GOOGLE_CALLBACK_URL ?? new URL('/auth/google/callback', env.PUBLIC_API_URL).toString();
+  return resolvedGoogleCallbackUrl;
+}
+
+/** RFC 6265 domain-match: host equals the domain or is a subdomain of it. */
+function domainMatches(host: string, domain: string): boolean {
+  const bare = domain.replace(/^\./, '').toLowerCase();
+  const h = host.toLowerCase();
+  return h === bare || h.endsWith(`.${bare}`);
+}
+
+// Group 3 fix. A browser silently DROPS a Set-Cookie whose Domain does not
+// domain-match the responding host. A USER_COOKIE_DOMAIN left on `.kodbot.ir`
+// after the move to rahighkhabar.ir made every Google sign-in "succeed" with no
+// cookie stored at all. A non-matching value is now ignored (host-only cookie,
+// which works for www -> api same-site requests) and reported at startup.
+const resolvedUserCookieDomain: string | undefined = (() => {
+  const configured = env.USER_COOKIE_DOMAIN;
+  if (configured === undefined) return undefined;
+  const apiHost = new URL(env.PUBLIC_API_URL).hostname;
+  const siteHost = new URL(env.PUBLIC_SITE_URL).hostname;
+  if (!domainMatches(apiHost, configured) || !domainMatches(siteHost, configured)) {
+    configurationProblems.push(
+      `USER_COOKIE_DOMAIN "${configured}" does not cover both ${apiHost} and ${siteHost}; ` +
+      'browsers would reject the visitor cookie, so it was ignored and the cookie stays host-only.',
+    );
+    return undefined;
+  }
+  return configured.replace(/^\./, '').toLowerCase();
+})();
+
+/** Validated Domain attribute for the visitor cookie, or undefined for host-only. */
+export function userCookieDomain(): string | undefined {
+  return resolvedUserCookieDomain;
+}
+
+// CORS and the write-origin guard compare against CORS_ORIGIN exactly. If it is
+// not the site origin, every credentialed call from the site is refused.
+if (env.CORS_ORIGIN !== new URL(env.PUBLIC_SITE_URL).origin) {
+  configurationProblems.push(
+    `CORS_ORIGIN (${env.CORS_ORIGIN}) differs from PUBLIC_SITE_URL (${env.PUBLIC_SITE_URL}); ` +
+    'browser requests from the site will be rejected unless this is intentional.',
+  );
+}
+// Behind Railway's proxy every request arrives from the proxy address unless
+// TRUST_PROXY lists it. Rate limits and the analytics visitor hash would then
+// treat all readers as one IP.
+if (env.NODE_ENV === 'production' && env.TRUST_PROXY.length === 0) {
+  configurationProblems.push(
+    'TRUST_PROXY is empty in production: behind a reverse proxy all readers share one IP, ' +
+    'which merges unique visitors and view de-duplication and shares one rate-limit bucket.',
+  );
 }
 
 // Stage 10 Part 5 feature switches. Routes read these and answer a clear 503

@@ -4,11 +4,15 @@ import type { FastifyPluginAsync } from 'fastify';
 import { env } from '../../config/env.js';
 import { mediaRoutes } from './media.routes.js';
 import { mediaUploadRoutes } from './media.upload.routes.js';
+import { registerMediaStorage } from './media.registry.js';
 import { LocalMediaStorage, storedFilenamePattern } from './storage.js';
 const mediaModule: FastifyPluginAsync = async (app) => {
   const storage = new LocalMediaStorage(env.UPLOAD_DIR, env.PUBLIC_API_URL);
   await storage.initialize();
   await storage.recover(async (id) => Boolean(await app.prisma.media.findUnique({ where: { id }, select: { id: true } })));
+  // Group 1: deleting an article (news module) removes its files through this
+  // same instance, so both share one in-process removal lock.
+  registerMediaStorage(storage);
   if (env.NODE_ENV === 'production') {
     app.log.warn('Local media storage requires a persistent volume and backups. Ephemeral Railway storage loses uploads on redeploy.');
   }

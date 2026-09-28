@@ -23,12 +23,57 @@ const allowedTags = [
   "li",
   "h2",
   "h3",
+  // Group 1: Tiptap's TextStyle mark (font family / font size) renders as a
+  // <span style="...">. Only the two style properties below survive.
+  "span",
 ]
 
 const allowedAttributes: Record<string, string[]> = {
   img: ["src", "alt"],
   a: ["href", "title", "rel", "target"],
+  span: ["style"],
   iframe: ["src", "width", "height", "frameborder", "allow", "allowfullscreen"],
+}
+
+/**
+ * Group 1 — the ONLY inline styles an article body may carry.
+ *
+ * ALLOW-LIST, NOT BLOCK-LIST: sanitize-html parses the style attribute and
+ * keeps a declaration only when its property is listed here AND its value
+ * matches one of the anchored patterns. Everything else (url(), expression(),
+ * position, background, @import, arbitrary colours...) is dropped, so the
+ * attribute cannot be used for CSS injection or overlay/clickjacking tricks.
+ *
+ * VALUES MIRROR THE EDITOR TOOLBAR exactly (components/admin/editor-fonts.ts in
+ * the frontend): three font tokens and seven pixel sizes. The font value is a
+ * CSS custom property rather than a family name because the site's webfonts
+ * are self-hosted under generated names; the variable is defined once in
+ * globals.css and resolves to the right face on every page.
+ */
+export const EDITOR_FONT_FAMILY_VALUES = ["var(--font-vazirmatn)", "var(--font-shabnam)", "var(--font-peyda)"] as const
+export const EDITOR_FONT_SIZE_VALUES = [14, 16, 18, 20, 24, 28, 32] as const
+
+const allowedStyles = {
+  span: {
+    "font-family": [/^var\(--font-(?:vazirmatn|shabnam|peyda)\)$/],
+    "font-size": [new RegExp(`^(?:${EDITOR_FONT_SIZE_VALUES.join("|")})px$`)],
+  },
+}
+
+// Links may point to http(s) pages or open a mail client. Nothing else:
+// javascript:, data:, vbscript:, file:, relative and protocol-relative URLs
+// are all rejected (the <a> is unwrapped to plain text).
+const allowedLinkProtocols = new Set(["http:", "https:", "mailto:"])
+
+export function isAllowedLinkHref(href: string): boolean {
+  const value = href.trim()
+  // Absolute URLs only: this also rules out "//evil.example" and "/path".
+  if (!/^[a-z][a-z0-9+.-]*:/i.test(value)) return false
+  try {
+    return allowedLinkProtocols.has(new URL(value).protocol)
+  } catch {
+    return false
+  }
 }
 
 const allowedEmbedHosts = [
@@ -72,7 +117,11 @@ export function sanitizeNewsBody(html: string): string {
     allowedAttributes,
     // javascript:, data: and vbscript: URLs can never survive this list.
     allowedSchemes: ["https", "mailto"],
+    // Group 1: links (and only links) may also use plain http.
+    allowedSchemesByTag: { a: ["http", "https", "mailto"] },
     allowedSchemesAppliedToAttributes: ["href", "src"],
+    allowProtocolRelative: false,
+    allowedStyles,
     disallowedTagsMode: "discard",
     transformTags: {
       img: (tagName: string, attribs: Attributes) => {
@@ -100,8 +149,8 @@ export function sanitizeNewsBody(html: string): string {
         }
       },
       a: (tagName: string, attribs: Attributes) => {
-        const href = attribs.href ?? ""
-        if (!href) return { tagName: "span", attribs: {} }
+        const href = (attribs.href ?? "").trim()
+        if (!href || !isAllowedLinkHref(href)) return { tagName: "span", attribs: {} }
         return {
           tagName,
           attribs: {

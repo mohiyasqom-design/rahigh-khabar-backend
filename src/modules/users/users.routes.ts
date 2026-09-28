@@ -1,7 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { errorResponses } from '../../utils/http-schemas.js';
 import { emptyQuerySchema } from '../../utils/validation.js';
-import { USER_COOKIE_NAME, userCookieOptions } from '../auth/auth.cookie.js';
+import { USER_COOKIE_NAME, userCookieClearVariants } from '../auth/auth.cookie.js';
 import { requireSiteUser } from './index.js';
 import {
   siteUserResponseSchema, updateProfileSchema,
@@ -48,7 +48,7 @@ export const usersRoutes: FastifyPluginAsync = async (app) => {
     emptyQuerySchema.parse(request.query);
     // Clearing is unconditional: an already-anonymous caller still gets 204,
     // so وابستگی to a valid session cannot strand a stale cookie.
-    reply.clearCookie(USER_COOKIE_NAME, userCookieOptions);
+    for (const options of userCookieClearVariants) reply.clearCookie(USER_COOKIE_NAME, options);
     return reply.code(204).send();
   });
 };

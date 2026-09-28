@@ -1,9 +1,10 @@
 import { imageSize } from 'image-size';
 import { ApiError } from '../../utils/api-error.js';
 import { detectImage } from './media.signature.js';
+import type { DetectImageOptions } from './media.signature.js';
 export type { ImageExtension } from './media.signature.js';
-export function inspectImage(buffer: Buffer, reportedMime: string) {
-  const { extension, mimeType } = detectImage(buffer, reportedMime);
+export function inspectImage(buffer: Buffer, reportedMime: string, options: DetectImageOptions = {}) {
+  const { extension, mimeType } = detectImage(buffer, reportedMime, options);
   const invalid = () => new ApiError(415, 'UNSUPPORTED_IMAGE', 'ساختار یا ابعاد تصویر نامعتبر است.');
   try {
     const result = imageSize(buffer);

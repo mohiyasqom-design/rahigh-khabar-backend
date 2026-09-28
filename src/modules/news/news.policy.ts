@@ -14,8 +14,11 @@ export const newsPolicy = {
   },
   assert(actor: NewsActor, news: { authorId: string; status: NewsStatus }, action: 'read' | 'edit' | 'delete' | 'status'): void {
     if (actor.role === 'SUPER_ADMIN') return;
-    if (action === 'delete' || action === 'status' || news.authorId !== actor.id ||
-        (action === 'edit' && !editableStatuses.includes(news.status))) {
+    // Group 1: an ADMIN (writer) may delete their OWN article while it is still
+    // unpublished (same statuses they may edit). Published/archived content and
+    // other authors' articles stay SUPER_ADMIN-only.
+    if (action === 'status' || news.authorId !== actor.id ||
+        ((action === 'edit' || action === 'delete') && !editableStatuses.includes(news.status))) {
       throw new ApiError(403, 'FORBIDDEN', 'اجازهٔ انجام این عملیات روی این خبر را ندارید.');
     }
   },

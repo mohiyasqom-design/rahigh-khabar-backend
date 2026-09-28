@@ -26,6 +26,7 @@ import {
   type ViewEventInput,
 } from './analytics.schema.js';
 import { saltDayKey } from './analytics.time.js';
+import { ViewDeduper } from './analytics.dedupe.js';
 
 const MAX_REFERRER = 1024;
 const MAX_PATH = 512;
@@ -40,7 +41,13 @@ export type IngestContext = {
   userId: string | null;
 };
 
-export type IngestOutcome = 'recorded' | 'ignored';
+export type IngestOutcome = 'recorded' | 'ignored' | 'duplicate';
+
+// Group 3: one shared, memory-bounded window for the whole process.
+const viewDeduper = new ViewDeduper(
+  analyticsConfig.viewDedupeWindowMs,
+  analyticsConfig.viewDedupeMaxEntries,
+);
 
 async function newsExists(prisma: PrismaClient, newsId: string): Promise<boolean> {
   const found = await prisma.news.findUnique({ where: { id: newsId }, select: { id: true } });
@@ -57,14 +64,22 @@ export async function recordPageView(
   const newsId = input.newsId ?? null;
   if (newsId !== null && !(await newsExists(prisma, newsId))) return 'ignored';
 
+  const visitorId = visitorIdFor(context.ip, context.userAgent, saltDayKey());
+  const path = clampStored(input.path ?? null, MAX_PATH);
+  // A signed-in reader is identified by account (stable across networks);
+  // everyone else by the daily visitor hash. Never by a raw IP.
+  const reader = context.userId !== null ? `u:${context.userId}` : `v:${visitorId}`;
+  const target = newsId !== null ? `n:${newsId}` : `p:${path ?? '/'}`;
+  if (!viewDeduper.shouldCount(`${reader}|${target}`)) return 'duplicate';
+
   const referrer = clampStored(context.referrerHeader ?? input.referrer ?? null, MAX_REFERRER);
 
   await prisma.pageView.create({
     data: {
       newsId,
       userId: context.userId,
-      visitorId: visitorIdFor(context.ip, context.userAgent, saltDayKey()),
-      path: clampStored(input.path ?? null, MAX_PATH),
+      visitorId,
+      path,
       referrer,
       referrerSource: classifyReferrer(referrer, env.PUBLIC_SITE_URL),
       userAgent: clampStored(context.userAgent, MAX_USER_AGENT),

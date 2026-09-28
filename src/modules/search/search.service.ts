@@ -77,7 +77,7 @@ async function runHybridSearch(
       ${categoryFilter}
       AND (
         n."searchVector" @@ websearch_to_tsquery('simple', ${query.q})
-        ${vector ? Prisma.sql`OR e."embedding" IS NOT NULL` : Prisma.empty}
+        ${vector ? Prisma.sql`OR (1 - (e."embedding" <=> ${toVectorLiteral(vector)}::vector)) >= 0.4` : Prisma.empty}
       )
     ORDER BY (
       ts_rank(n."searchVector", websearch_to_tsquery('simple', ${query.q})) * 1.0
@@ -136,7 +136,19 @@ export async function searchNews(prisma: PrismaClient, query: SearchQuery) {
   const degraded = query.mode === 'semantic' && vector === null;
 
   try {
-    const { rows, total } = await runHybridSearch(prisma, query, vector);
+    // Group 3: when pgvector / news_embeddings is missing, the hybrid query
+    // throws. Retry PostgreSQL FTS alone before dropping to the slow ILIKE
+    // fallback, instead of losing full-text ranking entirely.
+    let vectorUsed = vector;
+    let result: { rows: RawRow[]; total: number };
+    try {
+      result = await runHybridSearch(prisma, query, vector);
+    } catch (error) {
+      if (vector === null) throw error;
+      vectorUsed = null;
+      result = await runHybridSearch(prisma, query, null);
+    }
+    const { rows, total } = result;
     const extra = await decorate(prisma, rows.map((row) => row.id));
     const items: SearchResultItem[] = rows.map((row) => ({
       id: row.id, title: row.title, slug: row.slug, lead: row.lead,
@@ -146,8 +158,8 @@ export async function searchNews(prisma: PrismaClient, query: SearchQuery) {
     }));
     return {
       ...pageResult(items, total, query.page, query.pageSize),
-      mode: vector ? 'hybrid' : 'keyword',
-      degraded,
+      mode: vectorUsed ? 'hybrid' : 'keyword',
+      degraded: degraded || (vector !== null && vectorUsed === null),
     };
   } catch {
     const { items, total } = await runFallbackSearch(prisma, query);

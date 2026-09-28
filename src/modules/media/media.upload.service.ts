@@ -31,8 +31,10 @@ export async function uploadMediaFile(
   altText: string | null,
   uploader: Uploader,
 ) {
-  // Throws 415 for anything that is not a real JPEG/PNG/WebP.
-  inspectImage(file.buffer, file.mimetype);
+  // Throws 415 for anything that is not a real JPEG/PNG/WebP. Trailing bytes
+  // after a JPEG's end marker (phone camera trailers) are tolerated here only
+  // because the file is re-encoded to WebP below and never stored as sent.
+  inspectImage(file.buffer, file.mimetype, { allowTrailingData: true });
 
   let optimised: Buffer;
   let width: number | null = null;

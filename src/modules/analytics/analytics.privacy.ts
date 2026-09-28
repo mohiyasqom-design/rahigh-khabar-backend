@@ -17,9 +17,15 @@ import { analyticsHashSecret } from '../../config/env.js';
 /**
  * Crawlers, previewers and scripted clients. Checked before anything is
  * written, so bot traffic never reaches the dashboards.
+ *
+ * Group 3: `telegram` / `whatsapp` used to match the bare app names, which also
+ * matched the Telegram in-app browser (UA contains "Telegram-Android/…") —
+ * a large share of real readers of a Persian news site were silently dropped.
+ * Only the link-preview fetchers are matched now: "TelegramBot" and
+ * "WhatsApp/<version>".
  */
 const NON_HUMAN_PATTERN =
-  /bot|crawler|crawling|spider|slurp|bingpreview|yandex|baidu|duckduck|facebookexternalhit|embedly|quora|pinterest|vkshare|whatsapp|telegram|twitterbot|discord|applebot|ia_archiver|semrush|ahrefs|mj12|dotbot|petalbot|serpstat|screaming|lighthouse|pagespeed|headless|phantomjs|puppeteer|playwright|selenium|python-requests|python-urllib|curl\/|wget|okhttp|apache-httpclient|axios\/|go-http-client|libwww|scrapy|feedfetcher|monitoring|uptime/i;
+  /bot|crawler|crawling|spider|slurp|bingpreview|yandex|baidu|duckduck|facebookexternalhit|embedly|quora|pinterest|vkshare|whatsapp\/|telegrambot|twitterbot|discord|applebot|ia_archiver|semrush|ahrefs|mj12|dotbot|petalbot|serpstat|screaming|lighthouse|pagespeed|headless|phantomjs|puppeteer|playwright|selenium|python-requests|python-urllib|curl\/|wget|okhttp|apache-httpclient|axios\/|go-http-client|libwww|scrapy|feedfetcher|monitoring|uptime/i;
 
 /**
  * A missing or empty User-Agent is treated as non-human: every real browser

@@ -27,11 +27,14 @@ const newsAdminRoutes: FastifyPluginAsync = async (app) => {
       const { id } = idParamsSchema.parse(request.params);
       return updateNews(app.prisma, requireActor(request.authUser), id, updateNewsSchema.parse(request.body));
     });
-  app.delete('/:id', { preHandler: superAdmin, schema: { response: { 204: { type: 'null' }, ...errorResponses } } },
+  // Group 1: opened to ADMIN (writer). Ownership and status are enforced in
+  // newsPolicy against the STORED record, so an ADMIN can only delete their
+  // own unpublished articles; SUPER_ADMIN can delete any article.
+  app.delete('/:id', { preHandler: editors, schema: { response: { 204: { type: 'null' }, ...errorResponses } } },
     async (request, reply) => {
       emptyQuerySchema.parse(request.query);
       const { id } = idParamsSchema.parse(request.params);
-      await deleteNews(app.prisma, requireActor(request.authUser), id);
+      await deleteNews(app.prisma, requireActor(request.authUser), id, request.log);
       return reply.code(204).send();
     });
   app.post('/:id/status', { preHandler: superAdmin, schema: { response: { 200: adminNewsResponseSchema, ...errorResponses } } },
